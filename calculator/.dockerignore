@@ -1,0 +1,22 @@
+# Maven build output
+target/
+
+# IDE files
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+*.classpath
+*.project
+*.settings/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Maven wrapper cache
+.mvn/wrapper/maven-wrapper.jar
+
+# Logs
+*.log

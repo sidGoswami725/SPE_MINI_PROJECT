@@ -1,0 +1,110 @@
+pipeline {
+    agent any
+
+    environment {
+        DOCKER_HUB_USER = 'your-dockerhub-username'   // replace with your Docker Hub username
+        IMAGE_NAME      = "${DOCKER_HUB_USER}/calculator"
+        IMAGE_TAG       = "${BUILD_NUMBER}"
+    }
+
+    triggers {
+        // Webhook preferred; Poll SCM as fallback every 2 minutes
+        pollSCM('H/2 * * * *')
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Build') {
+            steps {
+                sh './mvnw clean package -DskipTests -q'
+            }
+        }
+
+        stage('Test') {
+            steps {
+                sh './mvnw test'
+            }
+            post {
+                always {
+                    junit 'target/surefire-reports/*.xml'
+                }
+            }
+        }
+
+        stage('Docker Build') {
+            steps {
+                sh """
+                    docker build \
+                        --tag ${IMAGE_NAME}:${IMAGE_TAG} \
+                        --tag ${IMAGE_NAME}:latest \
+                        .
+                """
+            }
+        }
+
+        stage('Push') {
+            steps {
+                withCredentials([usernamePassword(
+                        credentialsId: 'dockerhub-credentials',
+                        usernameVariable: 'DOCKER_USER',
+                        passwordVariable: 'DOCKER_PASS')]) {
+                    sh """
+                        echo "${DOCKER_PASS}" | docker login -u "${DOCKER_USER}" --password-stdin
+                        docker push ${IMAGE_NAME}:${IMAGE_TAG}
+                        docker push ${IMAGE_NAME}:latest
+                        docker logout
+                    """
+                }
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                sh """
+                    export BUILD_NUMBER=${IMAGE_TAG}
+                    export DOCKER_HUB_USER=${DOCKER_HUB_USER}
+                    docker compose pull
+                    docker compose up -d --remove-orphans
+                    sleep 20
+                    docker compose ps
+                    # Verify the health endpoint
+                    curl -f http://localhost/actuator/health | grep -q '\"status\":\"UP\"'
+                """
+            }
+        }
+    }
+
+    post {
+        success {
+            mail to: 'your-email@example.com',
+                 subject: "✅ [${currentBuild.fullDisplayName}] BUILD SUCCESS",
+                 body: """Build ${BUILD_NUMBER} succeeded.
+
+Job:    ${env.JOB_NAME}
+Number: ${BUILD_NUMBER}
+URL:    ${BUILD_URL}
+"""
+        }
+        failure {
+            mail to: 'your-email@example.com',
+                 subject: "❌ [${currentBuild.fullDisplayName}] BUILD FAILED",
+                 body: """Build ${BUILD_NUMBER} failed.
+
+Job:    ${env.JOB_NAME}
+Number: ${BUILD_NUMBER}
+URL:    ${BUILD_URL}
+
+Please check the console output for details.
+"""
+        }
+        always {
+            cleanWs()
+        }
+    }
+}
