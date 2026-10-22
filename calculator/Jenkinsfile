@@ -1,19 +1,13 @@
+
 pipeline {
     agent any
 
     environment {
-        DOCKER_HUB_USER = 'sidgoswami725'   // replace with your Docker Hub username
-        IMAGE_NAME      = "${DOCKER_HUB_USER}/calculator-api"
-        IMAGE_TAG       = "${BUILD_NUMBER}"
-    }
-
-    triggers {
-        // Webhook preferred; Poll SCM as fallback every 2 minutes
-        pollSCM('H/2 * * * *')
+        DOCKERHUB_USER = 'sidgoswami725'
+        IMAGE_NAME = 'sidgoswami725/calculator-api'
     }
 
     stages {
-
         stage('Checkout') {
             steps {
                 checkout scm
@@ -22,89 +16,85 @@ pipeline {
 
         stage('Build') {
             steps {
-                sh './mvnw clean package -DskipTests -q'
+                dir('calculator') {
+                    bat '.\\mvnw.cmd -B clean package -DskipTests'
+                }
             }
         }
 
         stage('Test') {
             steps {
-                sh './mvnw test'
+                dir('calculator') {
+                    bat '.\\mvnw.cmd -B test'
+                }
             }
             post {
                 always {
-                    junit 'target/surefire-reports/*.xml'
+                    junit testResults: 'calculator/target/surefire-reports/*.xml',
+                          allowEmptyResults: false
                 }
             }
         }
 
         stage('Docker Build') {
             steps {
-                sh """
-                    docker build \
-                        --tag ${IMAGE_NAME}:${IMAGE_TAG} \
-                        --tag ${IMAGE_NAME}:latest \
-                        .
-                """
+                dir('calculator') {
+                    bat 'docker build -t %IMAGE_NAME%:%BUILD_NUMBER% -t %IMAGE_NAME%:latest .'
+                }
             }
         }
 
         stage('Push') {
             steps {
-                withCredentials([usernamePassword(
+                withCredentials([
+                    usernamePassword(
                         credentialsId: 'dockerhub-credentials',
-                        usernameVariable: 'DOCKER_USER',
-                        passwordVariable: 'DOCKER_PASS')]) {
-                    sh """
-                        echo "${DOCKER_PASS}" | docker login -u "${DOCKER_USER}" --password-stdin
-                        docker push ${IMAGE_NAME}:${IMAGE_TAG}
-                        docker push ${IMAGE_NAME}:latest
+                        usernameVariable: 'DH_USER',
+                        passwordVariable: 'DH_TOKEN'
+                    )
+                ]) {
+                    bat '''
+                        @echo off
+                        echo %DH_TOKEN%| docker login --username %DH_USER% --password-stdin
+                        if errorlevel 1 exit /b 1
+                        docker push %IMAGE_NAME%:%BUILD_NUMBER%
+                        if errorlevel 1 exit /b 1
+                        docker push %IMAGE_NAME%:latest
+                        if errorlevel 1 exit /b 1
                         docker logout
-                    """
+                    '''
                 }
             }
         }
 
         stage('Deploy') {
             steps {
-                sh """
-                    export BUILD_NUMBER=${IMAGE_TAG}
-                    export DOCKER_HUB_USER=${DOCKER_HUB_USER}
-                    docker compose pull
-                    docker compose up -d --remove-orphans
-                    sleep 20
-                    docker compose ps
-                    # Verify the health endpoint
-                    curl -f http://localhost/actuator/health | grep -q '\"status\":\"UP\"'
-                """
+                dir('calculator') {
+                    bat 'docker compose up -d'
+                    bat 'docker compose ps'
+                    powershell '''
+                        $ErrorActionPreference = "Stop"
+                        $healthy = $false
+                        for ($i = 0; $i -lt 12; $i++) {
+                            try {
+                                $r = Invoke-RestMethod "http://localhost/actuator/health" -TimeoutSec 5
+                                if ($r.status -eq "UP") {
+                                    $healthy = $true
+                                    break
+                                }
+                            } catch {}
+                            Start-Sleep -Seconds 5
+                        }
+                        if (-not $healthy) {
+                            docker compose logs --tail=100
+                            throw "Calculator health check failed"
+                        }
+                        Write-Host "Calculator API is healthy."
+                    '''
+                }
             }
         }
     }
-
-    post {
-        success {
-            mail to: 'goswamisiddharth377@gmail.com',
-                 subject: "✅ [${currentBuild.fullDisplayName}] BUILD SUCCESS",
-                 body: """Build ${BUILD_NUMBER} succeeded.
-
-Job:    ${env.JOB_NAME}
-Number: ${BUILD_NUMBER}
-URL:    ${BUILD_URL}
-"""
-        }
-        failure {
-            mail to: 'your-email@example.com',
-                 subject: "❌ [${currentBuild.fullDisplayName}] BUILD FAILED",
-                 body: """Build ${BUILD_NUMBER} failed.
-
-Job:    ${env.JOB_NAME}
-Number: ${BUILD_NUMBER}
-URL:    ${BUILD_URL}
-
-Please check the console output for details.
-"""
-        }
-        always {
-            cleanWs()
-        }
-    }
 }
+
+
