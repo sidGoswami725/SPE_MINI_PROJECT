@@ -70,11 +70,14 @@ pipeline {
         stage('Deploy') {
             steps {
                 dir('calculator') {
-                    bat 'docker compose up -d'
-                    bat 'docker compose ps'
+                    bat '"C:\\Users\\Sid\\AppData\\Local\\Programs\\DockerDesktop\\resources\\cli-plugins\\docker-compose.exe" pull'
+                    bat '"C:\\Users\\Sid\\AppData\\Local\\Programs\\DockerDesktop\\resources\\cli-plugins\\docker-compose.exe" up -d'
+                    bat '"C:\\Users\\Sid\\AppData\\Local\\Programs\\DockerDesktop\\resources\\cli-plugins\\docker-compose.exe" ps'
+        
                     powershell '''
                         $ErrorActionPreference = "Stop"
                         $healthy = $false
+        
                         for ($i = 0; $i -lt 12; $i++) {
                             try {
                                 $r = Invoke-RestMethod "http://localhost/actuator/health" -TimeoutSec 5
@@ -85,10 +88,12 @@ pipeline {
                             } catch {}
                             Start-Sleep -Seconds 5
                         }
+        
                         if (-not $healthy) {
-                            docker compose logs --tail=100
+                            & "C:\\Users\\Sid\\AppData\\Local\\Programs\\DockerDesktop\\resources\\cli-plugins\\docker-compose.exe" logs --tail=100
                             throw "Calculator health check failed"
                         }
+        
                         Write-Host "Calculator API is healthy."
                     '''
                 }
