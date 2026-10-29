@@ -242,7 +242,7 @@ The pipeline can send success and failure notifications using the Jenkins Email 
 
 ## Docker Hub
 
-The published image repository is:
+The published image repository is at:
 
 https://hub.docker.com/r/sidgoswami725/calculator-api
 
